@@ -88,3 +88,71 @@ The agent uses OpenAI's function calling API to implement the following pattern:
 ## Disclaimer
 
 This project is for fun and to demonstrate my work to Spectral. Do not use this for trading.
+
+## Future Work
+
+1. Add more tools to allow users to use numerous trading strategies.
+2. Make the agent stay online so it can high frequency trade. There will be non trivial cost implications for model inference.
+3. Create a tool to gather coins/securities to do more research on.
+4. Mutiple agents can either work on multiple coins at the same time or use different tools to evaluate the same coin at the same time to allow for higher frequency trading.
+5. Creating intermediate models to ingest numeric data and output language data instead of hacing the LLM make sense of it directly to prevent hallucinations and reasoning errors.
+
+
+
+# Spectral Agent Test Suite
+
+The tests directory contains comprehensive tests for the Spectral Agent trading application. The tests are organized into different categories to validate the functionality of each component independently as well as the integrated workflow.
+
+## Test Structure
+
+- **Unit Tests**: Test individual components in isolation
+  - `test_twitter_sentiment.py`: Tests for the Twitter sentiment analysis tool
+  - `test_market_data.py`: Tests for the market data collection tool 
+  - `test_trading_execution.py`: Tests for the trading execution tool
+
+- **Integration Tests**: Test components working together
+  - `test_trading_workflow.py`: Tests the complete workflow from sentiment analysis to trade execution
+
+## Running the Tests
+
+![Alt test report](imgs/test_report.png)
+
+### Prerequisites
+
+- Python 3.9+
+- pytest (`pip install pytest`)
+- pytest-cov (for coverage reporting: `pip install pytest-cov mock`)
+- All dependencies installed (see main project requirements.txt)
+
+
+### Using the Provided Test Runner
+
+The easiest way to run tests is with the included test runner script:
+
+```bash
+
+# Run all tests
+./tests/run_tests.py
+
+# Run tests with verbose output
+./tests/run_tests.py --verbose
+
+# Run only unit tests
+./tests/run_tests.py --unit
+
+# Run with coverage report
+./tests/run_tests.py --coverage
+
+# Run specific tests
+./tests/run_tests.py --tests twitter_sentiment
+```
+
+#### Running Specific Test Categories
+
+```bash
+# Unit tests
+pytest tests/unit/
+
+# Integration tests
+pytest tests/integration/
+```

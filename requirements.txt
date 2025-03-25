@@ -1,5 +1,6 @@
 eth_account==0.13.5
 hyperliquid==0.4.66
+hyperliquid-python-sdk=0.10.1
 numpy==2.2.4
 openai==1.68.2
 pandas==2.2.3

@@ -74,6 +74,26 @@ python -m src.main --prompt "analyze the market and execute a trade if condition
 python -m src.main --interactive
 ```
 
+## Build with Docker Instead: 
+
+```bash
+docker build -t spectral-agent .
+```
+
+
+### Run with Docker after building:
+```bash
+docker run -it --rm spectral-agent
+```
+
+
+### Dry run for BTC:
+
+```bash
+docker run -it --rm spectral-agent \
+  python -m src.main --prompt "analyze sentiment for BTC" --symbol BTC --dry-run
+```
+
 ## 🔄 Agent Workflow
 
 1. **📝 User Input**: User provides a natural language request

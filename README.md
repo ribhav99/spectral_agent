@@ -1,8 +1,6 @@
 # 🤖 LLM-Powered Trading Agent
 
-<iframe width="560" height="315" src="https://youtu.be/NBHp1SBxw9c" 
-frameborder="0" allow="accelerometer; encrypted-media; gyroscope; picture-in-picture" 
-allowfullscreen></iframe>
+##Link to demo: https://youtu.be/NBHp1SBxw9c
 
 An LLM-driven trading agent that interacts with Hyperliquid to execute trades. The LLM acts as the central decision-making engine, dynamically selecting tools based on user context.
 

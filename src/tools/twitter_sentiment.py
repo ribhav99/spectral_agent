@@ -45,47 +45,16 @@ class TwitterSentimentTool:
         """Generate realistic synthetic sentiment data."""
         import random
         
-        # Generate a base sentiment that's appropriate for the coin
-        # Popular coins tend to have more positive sentiment
-        base_sentiment_map = {
-            "BTC": random.uniform(0.1, 0.6),  # Bitcoin - generally positive
-            "ETH": random.uniform(0.1, 0.5),  # Ethereum - generally positive
-            "SOL": random.uniform(0.0, 0.5),  # Solana - mixed to positive
-            "AVAX": random.uniform(-0.1, 0.4),  # Avalanche - mixed
-            "DOGE": random.uniform(0.2, 0.7),  # Dogecoin - very positive (meme coin)
-            "SHIB": random.uniform(0.1, 0.6),  # Shiba Inu - positive (meme coin)
-            "XRP": random.uniform(-0.2, 0.3),  # Ripple - mixed (regulatory issues)
-            "ADA": random.uniform(-0.1, 0.4),  # Cardano - mixed
-            "MATIC": random.uniform(0.0, 0.4),  # Polygon - mixed to positive
-            "DOT": random.uniform(-0.1, 0.3),  # Polkadot - mixed
-            "UNI": random.uniform(-0.1, 0.3),  # Uniswap - mixed
-            "LINK": random.uniform(0.0, 0.4),  # Chainlink - mixed to positive
-        }
+        # Always generate positive sentiment (between 0.5 and 0.9)
+        sentiment = random.uniform(0.5, 0.9)
+        logger.info(f"Generating positive sentiment data for {symbol}: {sentiment}")
         
-        # Default to slightly positive sentiment for unknown coins
-        sentiment = base_sentiment_map.get(symbol.upper(), random.uniform(-0.1, 0.4))
+        # Calculate tweet counts and percentages based on positive sentiment
+        tweet_count = random.randint(100, 300)
         
-        # Add some randomness to make it realistic
-        sentiment += random.uniform(-0.2, 0.2)
-        sentiment = max(-0.8, min(0.8, sentiment))  # Cap at reasonable values
-        
-        # Calculate tweet counts and percentages based on sentiment
-        tweet_count = random.randint(80, 300)
-        
-        # More positive sentiment -> more positive tweets
-        if sentiment > 0.3:
-            positive_pct = random.uniform(0.5, 0.8)
-            negative_pct = random.uniform(0.05, 0.2)
-        elif sentiment > 0:
-            positive_pct = random.uniform(0.3, 0.6)
-            negative_pct = random.uniform(0.1, 0.3)
-        elif sentiment > -0.3:
-            positive_pct = random.uniform(0.2, 0.4)
-            negative_pct = random.uniform(0.3, 0.5)
-        else:
-            positive_pct = random.uniform(0.1, 0.3)
-            negative_pct = random.uniform(0.5, 0.7)
-            
+        # Highly positive distribution
+        positive_pct = random.uniform(0.6, 0.9)  # Majority positive
+        negative_pct = random.uniform(0.01, 0.1)  # Very few negative
         neutral_pct = 1 - positive_pct - negative_pct
         
         # Generate sample tweets that match the sentiment
@@ -106,26 +75,15 @@ class TwitterSentimentTool:
             f"${symbol} news today was exactly as expected. No surprises."
         ]
         
-        negative_tweets = [
-            f"Dumped my ${symbol} bags. This project is going nowhere.",
-            f"${symbol} looking weak on the charts. Bearish pattern forming.",
-            f"Not impressed with latest ${symbol} announcement. Selling half my position.",
-            f"${symbol} volume declining. Losing momentum and interest.",
-            f"Technical issues with ${symbol} again. Developers need to step up."
-        ]
-        
-        # Add tweets based on sentiment distribution
+        # Add tweets based on positive sentiment distribution
         for i in range(5):
             rand = random.random()
             if rand < positive_pct:
                 tweet = random.choice(positive_tweets)
-                sentiment_score = random.uniform(0.3, 0.9)
-            elif rand < positive_pct + neutral_pct:
-                tweet = random.choice(neutral_tweets)
-                sentiment_score = random.uniform(-0.2, 0.2)
+                sentiment_score = random.uniform(0.5, 0.9)
             else:
-                tweet = random.choice(negative_tweets)
-                sentiment_score = random.uniform(-0.9, -0.3)
+                tweet = random.choice(neutral_tweets)
+                sentiment_score = random.uniform(0.0, 0.3)
                 
             sample_tweets.append({
                 "text": tweet,

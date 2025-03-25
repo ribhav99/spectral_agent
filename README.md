@@ -6,10 +6,9 @@ An LLM-driven trading agent that interacts with Hyperliquid to execute trades ba
 
 - **Advanced LLM Agent Architecture**: Uses OpenAI's function calling to intelligently select and execute the right tools at the right time.
 - **Dynamic Tool Selection**: LLM dynamically decides which tools to use based on the specific context and requirements.
-- **Modular Tools System**: Tools like Twitter sentiment analysis, market data fetcher, decision trees, and trade execution provide insights and actions.
+- **Modular Tools System**: Tools like Twitter sentiment analysis, market data fetcher, and trade execution provide insights and actions.
 - **Fully Agent-Driven**: The LLM maintains state and chains multiple tools together to achieve the user's goals.
 - **Hyperliquid Trading Execution**: Executes trades programmatically on the Hyperliquid Testnet.
-- **No API Keys Required for Twitter**: Uses snscrape to analyze Twitter sentiment without API keys or rate limits.
 
 ## Architecture
 
@@ -17,50 +16,39 @@ The project follows a modern AI agent architecture with the following components
 
 - **LLM Engine**: Core agent that dynamically decides which tools to call based on context.
 - **Tool Specification System**: Automatically generates OpenAI function descriptions from tool classes.
-- **Tools**: Modular components for data collection, analysis, and execution:
-  - Twitter Sentiment Analysis: Analyzes crypto sentiment on Twitter using snscrape.
+- **Tools**: Modular components for data collection, analysis, and execution (tools can be added with ease):
   - Market Data: Fetches live trading data from Hyperliquid.
-  - Decision Tree: Applies ML models to trading decisions.
   - Decision: Makes a final LONG/SHORT recommendation.
   - Trading Execution: Executes trades on Hyperliquid with risk management.
+
 
 ## Setup & Installation
 
 1. **Clone Repo**
    ```bash
-   git clone https://github.com/yourusername/llm-trading-agent.git
-   cd llm-trading-agent
+   git clone https://github.com/ribhav99/spectral_agent.git
+   cd spectral_agent
    ```
 
-2. **Install Dependencies**
+2. **Install Dependencies in Virtual Environment**
    ```bash
-   pip install -r requirements.txt
+   python -m venv venv
+   source venv/bin/activate
+   pip install uv
+   uv pip install -r requirements.txt
    ```
 
 3. **Set Up API Keys**
-   Create a `.env` file in the root directory with your API keys:
-   ```
-   OPENAI_API_KEY=your_key_here
-   ENVIRONMENT=development
-   ```
+   Create a `.env` file in the root directory with your API keys by copying the .env.example file.
 
-   **Hyperliquid Setup:**
-   - For detailed instructions on setting up Hyperliquid API access, see [HYPERLIQUID_SETUP.md](HYPERLIQUID_SETUP.md)
-   - The agent can run in synthetic data mode without API access by setting `USE_REAL_API=false` in your `.env` file
 
-4. **Install snscrape**
-   For Twitter sentiment analysis, make sure snscrape is properly installed:
-   ```bash
-   pip install git+https://github.com/JustAnotherArchivist/snscrape.git
-   ```
-
-5. **Run the Agent**
+4. **Run the Agent**
    ```bash
    # Run in interactive mode
    python -m src.main --interactive
    
    # Run with specific parameters
-   python -m src.main --prompt "trade using sentiment" --symbol BTC --dry-run
+   python -m src.main --prompt "trade using sentiment" --symbol ETH --amount 10 --dry-run 
    ```
 
 ## Example Usage
@@ -99,4 +87,4 @@ The agent uses OpenAI's function calling API to implement the following pattern:
 
 ## Disclaimer
 
-This project is for educational purposes only. Use at your own risk. Trading cryptocurrency involves significant risk and you can lose your money. 
+This project is for fun and to demonstrate my work to Spectral. Do not use this for trading.

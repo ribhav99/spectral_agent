@@ -19,8 +19,8 @@ DEFAULT_POSITION_SIZE = float(os.getenv("DEFAULT_POSITION_SIZE", "0.01"))  # 1% 
 DEFAULT_STOP_LOSS_PERCENT = float(os.getenv("DEFAULT_STOP_LOSS_PERCENT", "0.02"))  # 2% stop loss
 
 # API endpoints - prioritize env vars
-HYPERLIQUID_API_TESTNET = os.getenv("HYPERLIQUID_API_TESTNET", "https://api.hyperliquid-testnet.xyz/v1")
-HYPERLIQUID_API_MAINNET = os.getenv("HYPERLIQUID_API_MAINNET", "https://api.hyperliquid.xyz/v1")
+HYPERLIQUID_API_TESTNET = os.getenv("HYPERLIQUID_API_TESTNET", "https://api.hyperliquid-testnet.xyz")
+HYPERLIQUID_API_MAINNET = os.getenv("HYPERLIQUID_API_MAINNET", "https://api.hyperliquid.xyz")
 
 # Environment settings
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development")

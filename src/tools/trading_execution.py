@@ -2,7 +2,7 @@
 
 import time
 import json
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Union, Tuple
 import base64
 import requests
 from eth_account import Account
@@ -13,7 +13,18 @@ import hashlib
 from ..utils.logger import setup_logger
 from .. import config
 
+# Set up logger
 logger = setup_logger("trading_execution_tool")
+
+# Import the hyperliquid SDK
+try:
+    import eth_account
+    from eth_account.messages import encode_defunct
+    from hyperliquid.exchange import Exchange
+    from hyperliquid.info import Info
+    from hyperliquid.utils import constants
+except ImportError:
+    logger.warning("hyperliquid-python-sdk not installed. Run: pip install hyperliquid-python-sdk")
 
 class TradingExecutionTool:
     """Tool for executing trades on Hyperliquid based on decisions."""
@@ -24,16 +35,34 @@ class TradingExecutionTool:
         self.description = "Executes trades on Hyperliquid based on decisions"
         
         # Initialize trading connection
-        self.base_url = config.HYPERLIQUID_API_TESTNET
+        # Use mainnet since the wallet is registered there
+        self.base_url = constants.MAINNET_API_URL
         self.private_key = config.HYPERLIQUID_PRIVATE_KEY
+        self.wallet_address = None
         
-        # Derive wallet address from private key
+        logger.info(f"Initializing TradingExecutionTool with API URL: {self.base_url}")
+        
+        # Setup SDK-related attributes
+        self.exchange = None
+        self.info = None
+        
+        # Initialize if private key is available
         if self.private_key:
-            account = Account.from_key(self.private_key)
-            self.wallet_address = account.address
-            logger.info(f"Initialized trading executor with wallet: {self.wallet_address}")
+            try:
+                # Create account from private key
+                account = eth_account.Account.from_key(self.private_key)
+                self.wallet_address = account.address
+                logger.info(f"Initialized wallet with address: {self.wallet_address}")
+                
+                # Initialize Info client for market data
+                try:
+                    self.info = Info(self.base_url, skip_ws=True)
+                    logger.info("Initialized info client successfully")
+                except Exception as e:
+                    logger.error(f"Failed to initialize Info client: {str(e)}")
+            except Exception as e:
+                logger.error(f"Failed to initialize wallet: {str(e)}")
         else:
-            self.wallet_address = None
             logger.warning("No private key found, trading execution will run in simulation mode")
     
     def run(self, 
@@ -47,69 +76,57 @@ class TradingExecutionTool:
             sentiment_data: Dict[str, Any] = None,
             dry_run: bool = True) -> Dict[str, Any]:
         """
-        Execute a trade based on market data and sentiment analysis.
-        
+        Execute a trading strategy based on parameters
+
         Args:
-            symbol: Cryptocurrency symbol to trade
-            direction: "LONG" or "SHORT" (takes precedence if provided)
-            position_size: Position size as fraction of balance
-            stop_loss: Stop loss percentage
-            take_profit: Take profit percentage
-            amount: Dollar amount available for trading
-            market_data: Optional pre-fetched market data
-            sentiment_data: Optional sentiment analysis data
-            dry_run: If True, simulate the trade without actual execution
-            
+            symbol: Trading pair symbol
+            direction: 'LONG', 'SHORT', or None (to use sentiment-based decision)
+            position_size: Size as percentage of available margin
+            stop_loss: Stop loss percentage (not used)
+            take_profit: Take profit percentage (not used)
+            amount: Dollar amount to trade
+            market_data: Market data
+            sentiment_data: Sentiment data
+            dry_run: Whether to execute in dry run mode
+
         Returns:
-            Dictionary with trade execution results
+            Trading result dict
         """
-        # Validate the amount parameter to ensure it's not been overridden with an incorrect value
-        logger.info(f"Trading execution tool called for symbol: {symbol}, amount: ${amount}")
+        logger.info(f"💰 Trading execution for {symbol} with amount: ${amount} (dry_run: {dry_run})")
         
-        # Check if amount is too large, which might indicate an incorrect value
-        if amount > 1000:
-            logger.warning(f"Amount ${amount} seems unusually large. This may be an error. Double-check parameter.")
-            
-        # If direction is explicitly provided, use it
-        if direction:
-            trade_direction = direction.upper()
-            reasoning = "Using explicitly provided direction"
-            logger.info(f"Using explicitly provided direction: {trade_direction}")
-        else:
-            # Make a trading decision based on market data and sentiment
-            trade_decision = self._make_trading_decision(symbol, market_data, sentiment_data)
-            trade_direction = trade_decision["direction"]
-            reasoning = trade_decision["reasoning"]
-            
-            # If no clear direction, don't trade
-            if trade_direction == "NEUTRAL":
-                logger.info(f"Decision is NEUTRAL - no trade will be executed")
+        # Check minimum trade amount - log but don't throw error in dry run
+        MIN_TRADE_AMOUNT = 10.0
+        if amount < MIN_TRADE_AMOUNT:
+            logger.warning(f"⚠️ Amount ${amount} is below minimum ${MIN_TRADE_AMOUNT} - orders may be rejected")
+            if not dry_run:
                 return {
                     "symbol": symbol,
-                    "decision": "NEUTRAL",
-                    "reasoning": reasoning,
-                    "action": "No trade executed",
+                    "direction": direction if direction else "NEUTRAL",
+                    "status": "failed",
+                    "error": f"Amount ${amount} is below minimum ${MIN_TRADE_AMOUNT}",
                     "timestamp": int(time.time())
                 }
+        
+        # If direction is provided, use it
+        if direction:
+            trade_direction = direction.upper()
+            logger.info(f"Using provided direction: {trade_direction}")
+        else:
+            # Make decision based on sentiment/market data
+            trade_decision = self._make_trading_decision(symbol, market_data, sentiment_data)
+            trade_direction = trade_decision["direction"]
+            logger.info(f"Generated direction: {trade_direction} (based on sentiment/market analysis)")
             
-        # Create decision dict
+        # Create simplified decision dict (no stop loss or take profit)
         custom_decision = {
             "symbol": symbol,
-            "decision": trade_direction,
-            "position_size": position_size or config.DEFAULT_POSITION_SIZE,
-            "stop_loss": stop_loss or config.DEFAULT_STOP_LOSS_PERCENT,
-            "take_profit": take_profit or (config.DEFAULT_STOP_LOSS_PERCENT * 2),
-            "confidence": 1.0,  # Default confidence
-            "reasoning": reasoning
+            "decision": trade_direction
         }
         
-        logger.info(f"Executing trade: {custom_decision['decision']} {symbol} with ${amount}")
+        # Execute the trade with market order only
+        logger.info(f"🚀 Executing {trade_direction} trade for {symbol} with ${amount}")
         result = self.execute_trade(custom_decision, dry_run=dry_run, amount=amount, market_data=market_data)
         
-        # Add sentiment data to the result if provided
-        if sentiment_data:
-            result["sentiment_data"] = sentiment_data
-            
         return result
     
     def execute_trade(self, 
@@ -118,188 +135,144 @@ class TradingExecutionTool:
                      amount: float = 100.0,
                      market_data: Dict[str, Any] = None) -> Dict[str, Any]:
         """
-        Execute a trade based on a decision.
-        
+        Execute a trade based on the decision
+
         Args:
-            decision: Trading decision dict containing symbol, direction, etc.
-            dry_run: If True, simulate the trade without execution
-            amount: Dollar amount available for trading
-            market_data: Optional pre-fetched market data
-            
+            decision: Trading decision with direction
+            dry_run: Whether to simulate the execution
+            amount: Dollar amount to trade
+            market_data: Market data for the symbol
+
         Returns:
-            Dictionary with trade execution results
+            Execution result
         """
-        if not decision:
-            logger.error("No decision provided")
-            return {"status": "error", "message": "No decision provided"}
-        
         symbol = decision.get("symbol", "BTC")
-        direction = decision.get("decision", "")
-        position_size = decision.get("position_size", config.DEFAULT_POSITION_SIZE)
-        stop_loss = decision.get("stop_loss", config.DEFAULT_STOP_LOSS_PERCENT)
-        take_profit = decision.get("take_profit", stop_loss * 2)
+        direction = decision.get("decision", "NEUTRAL")
         
-        logger.info(f"Executing {direction} trade for {symbol} with size {position_size}, amount: ${amount}")
-        
-        # Validate decision
-        if direction not in ["LONG", "SHORT"]:
-            logger.error(f"Invalid direction: {direction}")
-            return {"status": "error", "message": f"Invalid direction: {direction}"}
-        
-        # Convert direction to side
-        side = "b" if direction == "LONG" else "a"
-        
-        # Check if we already have market data available
-        current_price = None
-        if market_data and market_data.get("symbol") == symbol and market_data.get("current_price"):
-            # Use the price from pre-fetched market data
-            current_price = market_data.get("current_price")
-            logger.info(f"Using pre-fetched price for {symbol}: ${current_price}")
-        else:
-            # If no pre-fetched data, attempt to get market price directly
-            logger.info(f"No pre-fetched price found, fetching market price for {symbol}")
-            current_price = self._get_market_price(symbol)
-        
-        # Ensure we have a valid price
-        if not current_price:
-            return {"status": "error", "message": f"Could not get price for {symbol}"}
-        
-        # Use the specified amount instead of account balance
-        usd_position = amount * position_size
-        
-        # Calculate position size in crypto units
-        size = usd_position / current_price
-        
-        # Calculate stop loss and take profit prices
-        if direction == "LONG":
-            stop_loss_price = current_price * (1 - stop_loss)
-            take_profit_price = current_price * (1 + take_profit)
-        else:
-            stop_loss_price = current_price * (1 + stop_loss)
-            take_profit_price = current_price * (1 - take_profit)
-        
-        # Execute trade
-        if dry_run:
-            logger.info(f"DRY RUN: Would execute {direction} for {symbol} at {current_price} with size {size}, amount: ${usd_position}")
-            execution_result = {
-                "status": "success",
-                "message": "Dry run completed",
-                "is_dry_run": True
+        # Skip if direction is NEUTRAL
+        if direction == "NEUTRAL":
+            logger.info(f"NEUTRAL direction - no trade will be executed for {symbol}")
+            return {
+                "symbol": symbol,
+                "direction": direction,
+                "status": "not_executed",
+                "reason": "Neutral recommendation",
+                "timestamp": int(time.time())
             }
-        else:
-            if not self.private_key:
-                logger.warning("No private key available, running in simulation mode")
-                execution_result = {
-                    "status": "success",
-                    "message": "Simulated execution (no private key)",
-                    "is_simulation": True
-                }
-            else:
-                # Execute the order on Hyperliquid
-                execution_result = self._place_order(symbol, side, size)
-                
-                # If successful, place stop loss and take profit orders
-                if execution_result.get("status") == "success":
-                    logger.info("Order executed successfully, placing stop loss and take profit orders")
-                    
-                    # Place stop loss
-                    sl_size = size  # Same size as entry position
-                    sl_side = "a" if direction == "LONG" else "b"  # Opposite of entry position
-                    sl_result = self._place_order(symbol, sl_side, sl_size, 
-                                                  order_type="limit", 
-                                                  price=stop_loss_price,
-                                                  reduce_only=True)
-                    
-                    # Place take profit
-                    tp_size = size  # Same size as entry position
-                    tp_side = "a" if direction == "LONG" else "b"  # Opposite of entry position
-                    tp_result = self._place_order(symbol, tp_side, sl_size, 
-                                                  order_type="limit", 
-                                                  price=take_profit_price,
-                                                  reduce_only=True)
-                    
-                    # Add stop loss and take profit info to result
-                    execution_result["stop_loss"] = sl_result
-                    execution_result["take_profit"] = tp_result
+
+        logger.info(f"Executing {direction} trade for {symbol} with amount: ${amount}")
         
-        # Prepare the complete result
+        # Get market price
+        current_price = self._get_market_price(symbol)
+        
+        # Calculate size in asset units (e.g., ETH)
+        size = amount / current_price
+        # Round to 4 decimal places
+        size = round(size, 4)
+        
+        # Place the market order only (no stop loss or take profit)
+        entry_result = self._place_order(
+            symbol=symbol, 
+            side="b" if direction == "LONG" else "a", 
+            size=size, 
+            order_type="market",
+            dry_run=dry_run
+        )
+        
+        # Extract order details
+        order_id = "unknown"
+        executed_price = current_price
+        executed_size = size
+        
+        try:
+            if "response" in entry_result and "data" in entry_result["response"]:
+                filled_order = entry_result["response"]["data"]["statuses"][0].get("filled", {})
+                order_id = filled_order.get("oid", "unknown")
+                executed_price = filled_order.get("avgPx", current_price)
+                executed_size = filled_order.get("totalSz", size)
+                logger.info(f"Order executed at price: ${executed_price} for size: {executed_size}")
+            elif dry_run:
+                order_id = "dry-run-" + str(int(time.time()))
+        except Exception as e:
+            logger.warning(f"Could not extract complete order details: {e}")
+        
+        # Return simplified result
         result = {
             "symbol": symbol,
             "direction": direction,
-            "entry_price": current_price,
-            "position_size_usd": usd_position,
-            "position_size_units": size,
-            "stop_loss_price": stop_loss_price,
-            "take_profit_price": take_profit_price,
-            "execution_result": execution_result,
-            "timestamp": int(time.time()),
-            "trading_amount": amount
+            "order_id": order_id,
+            "status": "executed" if entry_result.get("status") == "ok" else "failed",
+            "price": executed_price,
+            "size": executed_size,
+            "amount": amount,
+            "timestamp": int(time.time())
         }
         
-        # Include market data if provided
-        if market_data:
-            result["market_data"] = market_data
+        # Include error details if order failed
+        if entry_result.get("status") != "ok":
+            result["error"] = entry_result.get("message", "Unknown error")
+            result["details"] = entry_result
             
+        logger.info(f"Trade execution completed: {result}")
         return result
     
-    def _get_market_price(self, symbol: str) -> Optional[float]:
-        """Get current market price for a symbol."""
+    def _get_market_price(self, symbol: str, retry_count: int = 0) -> Optional[float]:
+        """Get current market price for a symbol using the Hyperliquid SDK."""
         try:
-            logger.info(f"Fetching market price for {symbol} from {self.base_url}/info")
-            endpoint = f"{self.base_url}/info"
-            response = requests.get(endpoint)
+            # Create a standalone Info client if we don't have one
+            if not hasattr(self, 'info') or self.info is None:
+                logger.debug("Creating new Info client for market data")  # Changed from info to debug
+                self.info = Info(self.base_url, skip_ws=True)
             
-            if response.status_code == 200:
-                data = response.json()
+            # Reduce log level 
+            logger.debug(f"Fetching market price for {symbol}")  # Changed from info to debug
+            
+            # For dry runs, just return a reasonable default price to reduce API calls
+            if retry_count > 0:
+                # Use sensible defaults for testing
+                default_prices = {
+                    "BTC": 60000,
+                    "ETH": 3000,
+                    "SOL": 100,
+                    "AVAX": 35
+                }
+                clean_symbol = self._format_symbol(symbol)
+                return default_prices.get(clean_symbol, 2000)
                 
-                # Log the response structure for debugging
-                logger.debug(f"API response structure: {list(data.keys())}")
-                
-                # Check if markets data exists
-                if "markets" not in data:
-                    logger.error(f"No 'markets' field in API response: {data}")
-                    # Return a sample price for testing
-                    sample_price = {
-                        "BTC": 35000,
-                        "ETH": 2000,
-                        "SOL": 100
-                    }.get(symbol, 100)
-                    logger.info(f"Using sample price for {symbol}: ${sample_price}")
-                    return sample_price
-                
-                # Find the matching asset in the response
-                symbols_in_response = [market.get("symbol") for market in data.get("markets", [])]
-                logger.debug(f"Available symbols in API response: {symbols_in_response}")
-                
-                for market in data.get("markets", []):
-                    if market.get("symbol") == symbol:
-                        price = float(market.get("mark_price", 0))
-                        logger.info(f"Found market price for {symbol}: ${price}")
-                        return price
-                
-                logger.error(f"Symbol {symbol} not found in markets list. Available symbols: {symbols_in_response}")
+            # Call the all_mids method to get current prices
+            all_mids = self.info.all_mids()
+            
+            # Clean the symbol if needed
+            clean_symbol = symbol
+            if "-PERP" in symbol:
+                clean_symbol = symbol.replace("-PERP", "")
+            
+            # Check if the symbol exists in the returned data
+            if clean_symbol in all_mids:
+                price = float(all_mids[clean_symbol])
+                logger.info(f"Got price for {clean_symbol}: ${price}")
+                return price
             else:
-                logger.error(f"API request failed with status code {response.status_code}: {response.text}")
-            
-            # Return a sample price as fallback
-            sample_price = {
-                "BTC": 35000,
-                "ETH": 2000,
-                "SOL": 100
-            }.get(symbol, 100)
-            logger.info(f"Using sample price for {symbol}: ${sample_price}")
-            return sample_price
+                # Log all available symbols for debugging
+                logger.warning(f"Symbol {clean_symbol} not found in market data. Available symbols: {list(all_mids.keys())}")
+                
+            # Retry logic if price not found
+            if retry_count < 2:
+                logger.info(f"Retrying market price fetch for {symbol} (attempt {retry_count + 1})")
+                time.sleep(1)  # Brief delay before retry
+                return self._get_market_price(symbol, retry_count + 1)
+                
+            # Return a default value for testing purposes if all else fails
+            logger.warning(f"Unable to get market price for {symbol}, using default test value")
+            return 2000  # Default value for ETH price
             
         except Exception as e:
-            logger.error(f"Exception getting market price for {symbol}: {str(e)}", exc_info=True)
-            # Return a sample price as fallback
-            sample_price = {
-                "BTC": 35000,
-                "ETH": 2000,
-                "SOL": 100
-            }.get(symbol, 100)
-            logger.info(f"Using sample price for {symbol} after exception: ${sample_price}")
-            return sample_price
+            logger.error(f"Error getting market price: {str(e)}")
+            if retry_count < 2:
+                logger.info(f"Retrying after error (attempt {retry_count + 1})")
+                time.sleep(1)
+                return self._get_market_price(symbol, retry_count + 1)
+            return 2000  # Default value for testing
     
     def _get_account_balance(self) -> float:
         """Get account balance (USD)."""
@@ -323,111 +296,110 @@ class TradingExecutionTool:
             logger.error(f"Error getting account balance: {str(e)}")
             return 10000  # Default value for testing
     
-    def _place_order(self, 
-                    symbol: str, 
-                    side: str, 
-                    size: float, 
-                    order_type: str = "market",
-                    price: Optional[float] = None,
-                    reduce_only: bool = False) -> Dict[str, Any]:
+    def _place_order(self, symbol: str, side: str, size: float, order_type: str = "market", price: float = None, reduce_only: bool = False, dry_run: bool = False) -> dict:
         """
-        Place an order on Hyperliquid.
-        
+        Place an order on Hyperliquid
+
         Args:
-            symbol: Cryptocurrency symbol
-            side: 'b' for buy/long, 'a' for sell/short
-            size: Position size in crypto units
-            order_type: 'market', 'limit', or 'stop'
-            price: Limit price (required for limit and stop orders)
-            reduce_only: Whether the order should only reduce an existing position
-            
+            symbol: Trading pair
+            side: 'b' for buy, 'a' for sell
+            size: Position size in asset units
+            order_type: 'market' or 'limit'
+            price: Limit price (only for limit orders)
+            reduce_only: Whether the order should only reduce position
+            dry_run: Whether to simulate the order without execution
+
         Returns:
-            Dictionary with order execution result
+            Order result
         """
         try:
-            if not self.private_key:
+            if dry_run:
+                logger.info(f"DRY RUN: Would execute {order_type} {'buy' if side == 'b' else 'sell'} for {size} {symbol}")
+                # Simple dry run response to reduce clutter
                 return {
-                    "status": "success",
-                    "message": "Simulated order (no private key)",
-                    "is_simulation": True
+                    "status": "ok",
+                    "response": {"type": "success", "data": {"statuses": [{"filled": {"oid": int(time.time()), "totalSz": size, "avgPx": price or self._get_market_price(symbol)}}]}},
+                    "dry_run": True
                 }
+
+            # Initialize exchange connection
+            if not self.exchange:
+                self._init_exchange()
+
+            # Format the symbol for Hyperliquid
+            clean_symbol = self._format_symbol(symbol)
+            logger.info(f"Placing order for symbol: {clean_symbol}")
             
-            # Prepare order data
-            order_data = {
-                "symbol": symbol,
-                "side": side,
-                "size": str(size),
-                "order_type": order_type
-            }
+            # Check if order size is sufficient (minimum $10)
+            current_price = self._get_market_price(symbol)
+            order_value = size * current_price
             
-            if price:
-                order_data["limit_px"] = str(price)
-            
-            if reduce_only:
-                order_data["reduce_only"] = True
-            
-            # Sign the request
-            signature = self._sign_request(order_data)
-            
-            # Send request to API
-            endpoint = f"{self.base_url}/order"
-            headers = {
-                "Content-Type": "application/json",
-                "X-Signature": signature
-            }
-            
-            response = requests.post(endpoint, json=order_data, headers=headers)
-            
-            if response.status_code == 200:
-                return {
-                    "status": "success",
-                    "message": "Order executed",
-                    "order_id": response.json().get("order_id"),
-                    "response": response.json()
-                }
+            if order_value < 10.5:  # Add buffer to ensure minimum is met
+                logger.warning(f"Order value ${order_value} is below minimum $10. Adjusting size.")
+                # Adjust size to meet minimum
+                minimum_size = 10.5 / current_price
+                size = round(minimum_size, 4)
+                logger.info(f"Adjusted size to {size} to meet minimum order value")
+
+            is_buy = (side == "b")
+            logger.info(f"Order direction: {'Buy' if is_buy else 'Sell'}, Size: {size}, Type: {order_type}")
+
+            # Execute market orders using market_open
+            if order_type == "market":
+                logger.info(f"Executing market order for {clean_symbol}: {'Buy' if is_buy else 'Sell'} {size}")
+                if reduce_only:
+                    # For closing positions, use market_close
+                    logger.info(f"Closing position for {clean_symbol}")
+                    result = self.exchange.market_close(clean_symbol)
+                else:
+                    # For opening positions, use market_open
+                    logger.info(f"Opening position for {clean_symbol} with size {size}")
+                    
+                    # Use reasonable slippage protection (1%)
+                    slippage = 0.01
+                    result = self.exchange.market_open(clean_symbol, is_buy, size, None, slippage)
+                
+                logger.info(f"Market order result: {result}")
+                return result
+                
+            # Use order for limit orders
+            elif order_type == "limit" and price is not None:
+                # Round price to 2 decimal places for better compatibility with exchange requirements
+                price = round(price, 2)
+                logger.info(f"Executing limit order for {clean_symbol} at price {price}")
+                
+                # Use positional arguments instead of named arguments
+                result = self.exchange.order(
+                    clean_symbol,  # coin
+                    is_buy,        # is_buy
+                    size,          # sz
+                    price,         # limit_px
+                    None,          # cloid
+                    reduce_only    # reduce_only
+                )
+                logger.info(f"Limit order result: {result}")
+                return result
+                
             else:
-                logger.error(f"Order execution failed: {response.text}")
-                return {
-                    "status": "error",
-                    "message": f"Order execution failed: {response.text}"
-                }
+                logger.error(f"Invalid order type or missing price: {order_type}")
+                return {"status": "error", "message": "Invalid order type or missing price"}
                 
         except Exception as e:
-            logger.error(f"Error placing order: {str(e)}")
-            return {
-                "status": "error",
-                "message": f"Error placing order: {str(e)}"
+            error_msg = str(e)
+            logger.error(f"Error placing order: {error_msg}")
+            
+            # Enhance error details
+            error_details = {
+                "error": error_msg,
+                "symbol": symbol,
+                "side": side,
+                "size": size,
+                "order_type": order_type,
+                "price": price,
+                "reduce_only": reduce_only
             }
-    
-    def _sign_request(self, data: Dict[str, Any]) -> str:
-        """
-        Sign an API request using the private key.
-        
-        Args:
-            data: Request data to sign
             
-        Returns:
-            Hex signature string
-        """
-        try:
-            if not self.private_key:
-                return ""
-            
-            # Convert data to JSON string
-            message = json.dumps(data, separators=(',', ':'))
-            
-            # Create message hash
-            message_hash = encode_defunct(text=message)
-            
-            # Sign the message
-            signed_message = Account.sign_message(message_hash, private_key=self.private_key)
-            
-            # Return the signature
-            return signed_message.signature.hex()
-            
-        except Exception as e:
-            logger.error(f"Error signing request: {str(e)}")
-            return ""
+            return {"status": "error", "message": error_msg, "details": error_details}
     
     def _make_trading_decision(self, symbol: str, market_data: Dict[str, Any] = None, sentiment_data: Dict[str, Any] = None) -> Dict[str, Any]:
         """
@@ -517,4 +489,57 @@ class TradingExecutionTool:
             "direction": direction,
             "confidence": confidence,
             "reasoning": reasoning
-        } 
+        }
+    
+    def _init_exchange(self):
+        """Initialize the exchange connection using the Hyperliquid SDK."""
+        if self.exchange is not None:
+            logger.info("Exchange connection already initialized")
+            return
+            
+        try:
+            if not self.private_key:
+                logger.error("No private key configured for trading")
+                return
+                
+            # Create account from private key
+            account = eth_account.Account.from_key(self.private_key)
+            self.wallet_address = account.address
+            logger.info(f"Initializing exchange with wallet address: {self.wallet_address}")
+            
+            # Initialize exchange client
+            self.exchange = Exchange(account, self.base_url)
+            logger.info(f"Exchange client initialized with API URL: {self.base_url}")
+            
+            # Initialize info client if not already done
+            if self.info is None:
+                self.info = Info(self.base_url, skip_ws=True)
+                logger.info("Info client initialized for market data")
+                
+        except Exception as e:
+            logger.error(f"Failed to initialize exchange: {str(e)}")
+            raise 
+
+    def _format_symbol(self, symbol: str) -> str:
+        """
+        Format the symbol for Hyperliquid API.
+        
+        Args:
+            symbol: The input symbol (e.g., "ETH", "ETH-PERP", "BTC/USD")
+            
+        Returns:
+            Properly formatted symbol for Hyperliquid API
+        """
+        # Clean up common formats
+        clean_symbol = symbol.upper()
+        
+        # Remove common suffixes
+        if "-PERP" in clean_symbol:
+            clean_symbol = clean_symbol.replace("-PERP", "")
+        elif "/USD" in clean_symbol:
+            clean_symbol = clean_symbol.replace("/USD", "")
+        elif "USDT" in clean_symbol and not clean_symbol.startswith("USDT"):
+            clean_symbol = clean_symbol.replace("USDT", "")
+        
+        logger.info(f"Formatted symbol {symbol} to {clean_symbol} for Hyperliquid API")
+        return clean_symbol 

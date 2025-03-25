@@ -383,27 +383,21 @@ class LLMEngine:
                         
                         logger.info(f"Final recommendation: {direction}")
                         
-                        # Only execute trade if direction is not NEUTRAL
-                        if direction != "NEUTRAL":
-                            # Get trading execution tool instance
-                            trading_tool = self._get_manual_tool_instance("TradingExecutionTool")
-                            if not trading_tool:
-                                logger.error("Failed to get TradingExecutionTool instance")
-                                return context
+                        # Always execute the trade tool, even for NEUTRAL recommendations
+                        # The trading tool will handle the recommendation and any order size validations
+                        try:
+                            from .tools.trading_execution import TradingExecutionTool
+                            trade_tool = TradingExecutionTool()
                             
-                            # Get method
-                            run_method = getattr(trading_tool, "run", None)
-                            if not run_method:
-                                logger.error("Run method not found in TradingExecutionTool")
-                                return context
+                            # For NEUTRAL recommendations, we'll still call the tool but with a specific direction
+                            # The tool can make its own determination or respect the NEUTRAL recommendation
                             
                             # Prepare arguments for trading
                             trading_args = {
-                                "symbol": context.get("symbol"),
+                                "symbol": symbol,
                                 "direction": direction,
-                                "amount": context.get("amount", 100.0),
-                                "dry_run": context.get("dry_run", True),
-                                "reasoning": recommendation_content
+                                "amount": amount,
+                                "dry_run": dry_run
                             }
                             
                             # Add market data if available
@@ -421,39 +415,18 @@ class LLMEngine:
                                         trading_args["sentiment_data"] = tool_result
                                         logger.info(f"Adding sentiment data to trading args: {tool_result.get('sentiment_label')} ({tool_result.get('average_sentiment')})")
                                         break
+                                        
+                            trade_result = trade_tool.run(**trading_args)
+                            context["tool_results"]["TradingExecutionTool_run"] = trade_result
                             
-                            # Execute trade
-                            logger.info(f"Executing trade with direction: {direction}")
-                            trading_result = run_method(**trading_args)
-                            
-                            # Store result in context
-                            tool_key = "TradingExecutionTool_run"
-                            if "tool_results" not in context:
-                                context["tool_results"] = {}
-                            context["tool_results"][tool_key] = trading_result
-                            
-                            # Add recommendation to result
-                            trading_result["llm_recommendation"] = recommendation_content
-                            
-                            # Print the tool result
-                            print("\n===== Trading Execution Result =====")
-                            print(f"Direction: {direction}")
-                            print(f"Symbol: {context.get('symbol')}")
-                            
-                            if isinstance(trading_result, dict):
-                                for key, value in trading_result.items():
-                                    if key not in ["llm_recommendation", "market_data", "sentiment_data"]:
-                                        if isinstance(value, (dict, list)) and len(str(value)) > 100:
-                                            print(f"  {key}: [Complex data structure]")
-                                        else:
-                                            print(f"  {key}: {value}")
-                            
-                            logger.info(f"Trading execution completed")
-                        else:
-                            logger.info("Recommendation is NEUTRAL - no trade will be executed")
-                            
-                        # Set final message for context
-                        context["message"] = recommendation_content
+                            if direction == "NEUTRAL":
+                                logger.info(f"NEUTRAL recommendation - Trading tool executed with result: {trade_result}")
+                            else:
+                                logger.info(f"Trade executed with result: {trade_result}")
+                                
+                        except Exception as e:
+                            logger.error(f"Error executing trade: {str(e)}", exc_info=True)
+                            context["trade_error"] = str(e)
                     
                     except Exception as e:
                         logger.error(f"Error during trading execution: {str(e)}", exc_info=True)
